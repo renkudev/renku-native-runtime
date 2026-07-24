@@ -7,6 +7,10 @@ on:
         description: Semantic version tag, for example 0.1.0
         required: true
         type: string
+      reuse_runtime_version:
+        description: Existing release whose unchanged XCFramework should be reused, for example 0.1.0
+        required: false
+        type: string
 
 permissions:
   contents: write
@@ -20,8 +24,59 @@ env:
   HERMES_REVISION: efcf68e285865fd9d952070b08e751bcad63f25e
 
 jobs:
+  build-compiler:
+    name: Build macOS arm64 compiler
+    runs-on: macos-26
+
+    steps:
+      - name: Check out Hermes
+        uses: actions/checkout@v6
+        with:
+          repository: facebook/hermes
+          ref: ${{ env.HERMES_REVISION }}
+          path: hermes
+
+      - name: Report the build environment
+        run: |
+          xcodebuild -version
+          cmake --version
+          swift --version
+          test "$(uname -m)" = "arm64"
+
+      - name: Build the host compiler
+        working-directory: hermes
+        run: ./utils/build-apple-framework.sh build_hermesc
+
+      - name: Archive the host compiler
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          compiler="hermes/build_host_hermesc/bin/hermesc"
+          test -x "$compiler"
+          "$compiler" -version
+
+          bundle="$RUNNER_TEMP/hermesc-macos-arm64"
+          mkdir -p "$bundle/bin"
+          cp "$compiler" "$bundle/bin/hermesc"
+          cp hermes/LICENSE "$bundle/LICENSE-HERMES"
+          printf \
+            '{"repository":"https://github.com/facebook/hermes","revision":"%s","release":"%s"}\n' \
+            "$HERMES_REVISION" \
+            "$VERSION" \
+            > "$bundle/SOURCE.json"
+          tar -czf "$RUNNER_TEMP/hermesc-macos-arm64.tar.gz" -C "$bundle" .
+
+      - name: Upload the host compiler
+        uses: actions/upload-artifact@v4
+        with:
+          name: hermesc-macos-arm64
+          path: ${{ runner.temp }}/hermesc-macos-arm64.tar.gz
+          if-no-files-found: error
+          retention-days: 1
+
   build-slice:
     name: Build ${{ matrix.platform }}
+    if: inputs.reuse_runtime_version == ''
     runs-on: macos-26
     strategy:
       fail-fast: false
@@ -84,14 +139,20 @@ jobs:
       - name: Upload the slice
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.platform }}
+          name: runtime-${{ matrix.platform }}
           path: ${{ runner.temp }}/${{ matrix.platform }}.tar.gz
           if-no-files-found: error
           retention-days: 1
 
   release:
     name: Assemble and publish
-    needs: build-slice
+    needs:
+      - build-compiler
+      - build-slice
+    if: >-
+      always() &&
+      needs.build-compiler.result == 'success' &&
+      (needs.build-slice.result == 'success' || needs.build-slice.result == 'skipped')
     runs-on: macos-26
 
     steps:
@@ -114,6 +175,7 @@ jobs:
           fi
 
       - name: Check out Hermes headers
+        if: inputs.reuse_runtime_version == ''
         uses: actions/checkout@v6
         with:
           repository: facebook/hermes
@@ -121,11 +183,20 @@ jobs:
           path: hermes
 
       - name: Download runtime slices
+        if: inputs.reuse_runtime_version == ''
         uses: actions/download-artifact@v4
         with:
+          pattern: runtime-*
           path: slices
 
+      - name: Download the arm64 macOS compiler
+        uses: actions/download-artifact@v4
+        with:
+          name: hermesc-macos-arm64
+          path: compiler
+
       - name: Restore runtime slices
+        if: inputs.reuse_runtime_version == ''
         run: |
           for archive in slices/*/*.tar.gz; do
             platform=$(basename "$archive" .tar.gz)
@@ -135,6 +206,7 @@ jobs:
           done
 
       - name: Add public headers and module metadata
+        if: inputs.reuse_runtime_version == ''
         run: |
           for framework in hermes/destroot/Library/Frameworks/*/hermesvm.framework; do
             if [[ -d "$framework/Versions" ]]; then
@@ -158,15 +230,76 @@ jobs:
           done
 
       - name: Assemble the XCFramework
+        if: inputs.reuse_runtime_version == ''
         working-directory: hermes
         run: ./utils/build-apple-framework.sh build_framework
 
-      - name: Validate the Swift package
+      - name: Archive the newly built XCFramework
+        if: inputs.reuse_runtime_version == ''
         run: |
           mkdir -p Artifacts
           cp -R \
             hermes/destroot/Library/Frameworks/universal/hermesvm.xcframework \
             Artifacts/hermesvm.xcframework
+          ditto \
+            -c \
+            -k \
+            --sequesterRsrc \
+            --keepParent \
+            Artifacts/hermesvm.xcframework \
+            "$RUNNER_TEMP/hermesvm.xcframework.zip"
+
+      - name: Reuse the published XCFramework
+        if: inputs.reuse_runtime_version != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUNTIME_VERSION: ${{ inputs.reuse_runtime_version }}
+        run: |
+          if [[ ! "$RUNTIME_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Runtime reuse version must be a stable semantic version such as 0.1.0"
+            exit 1
+          fi
+          gh release download "$RUNTIME_VERSION" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern hermesvm.xcframework.zip \
+            --dir "$RUNNER_TEMP"
+
+          checksum=$(swift package compute-checksum "$RUNNER_TEMP/hermesvm.xcframework.zip")
+          expected=$(sed -nE 's/.*checksum: "([0-9a-f]{64})".*/\1/p' Package.swift)
+          test -n "$expected"
+          test "$checksum" = "$expected"
+          grep -q "/releases/download/$RUNTIME_VERSION/" Package.swift
+
+          mkdir -p Artifacts
+          ditto \
+            -x \
+            -k \
+            "$RUNNER_TEMP/hermesvm.xcframework.zip" \
+            Artifacts
+
+      - name: Validate and checksum the host compiler
+        run: |
+          archive="compiler/hermesc-macos-arm64.tar.gz"
+          directory="$RUNNER_TEMP/hermesc-validation"
+          mkdir -p "$directory"
+          tar -xzf "$archive" -C "$directory"
+          test -x "$directory/bin/hermesc"
+          [[ "$(file "$directory/bin/hermesc")" == *"arm64"* ]]
+          "$directory/bin/hermesc" -version
+          grep -q "\"revision\":\"$HERMES_REVISION\"" "$directory/SOURCE.json"
+
+          checksum=$(shasum -a 256 "$archive" | cut -d ' ' -f 1)
+          printf '%s  %s\n' "$checksum" "hermesc-macos-arm64.tar.gz" \
+            > "compiler/hermesc-macos-arm64.tar.gz.sha256"
+          echo "HERMESC=$directory/bin/hermesc" >> "$GITHUB_ENV"
+          echo "hermesc macOS arm64 SHA-256: \`$checksum\`" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Validate the Swift package
+        run: |
+          "$HERMESC" \
+            -emit-binary \
+            -out Sources/RenkuNativeRuntimeProbe/Fixtures/runtime.hbc \
+            Sources/RenkuNativeRuntimeProbe/Fixtures/runtime.js
           RENKU_NATIVE_LOCAL_XCFRAMEWORK=Artifacts/hermesvm.xcframework \
             swift run RenkuNativeRuntimeProbe
 
@@ -188,15 +321,8 @@ jobs:
                 build
           done
 
-      - name: Archive and checksum the XCFramework
+      - name: Checksum the XCFramework
         run: |
-          ditto \
-            -c \
-            -k \
-            --sequesterRsrc \
-            --keepParent \
-            Artifacts/hermesvm.xcframework \
-            "$RUNNER_TEMP/hermesvm.xcframework.zip"
           checksum=$(swift package compute-checksum "$RUNNER_TEMP/hermesvm.xcframework.zip")
           echo "CHECKSUM=$checksum" >> "$GITHUB_ENV"
           echo "XCFramework checksum: \`$checksum\`" >> "$GITHUB_STEP_SUMMARY"
@@ -233,6 +359,8 @@ jobs:
         run: |
           gh release create "$VERSION" \
             "$RUNNER_TEMP/hermesvm.xcframework.zip" \
+            compiler/hermesc-macos-arm64.tar.gz \
+            compiler/hermesc-macos-arm64.tar.gz.sha256 \
             LICENSE-HERMES \
             --title "$VERSION" \
             --generate-notes
