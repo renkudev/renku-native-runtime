@@ -55,6 +55,36 @@ jobs:
         working-directory: hermes
         run: ./utils/build-apple-framework.sh build_hermesc
 
+      - name: Archive the arm64 macOS compiler
+        if: matrix.platform == 'macosx'
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          test "$(uname -m)" = "arm64"
+          compiler="hermes/build_host_hermesc/bin/hermesc"
+          test -x "$compiler"
+          "$compiler" -version
+
+          bundle="$RUNNER_TEMP/hermesc-macos-arm64"
+          mkdir -p "$bundle/bin"
+          cp "$compiler" "$bundle/bin/hermesc"
+          cp hermes/LICENSE "$bundle/LICENSE-HERMES"
+          printf \
+            '{"repository":"https://github.com/facebook/hermes","revision":"%s","release":"%s"}\n' \
+            "$HERMES_REVISION" \
+            "$VERSION" \
+            > "$bundle/SOURCE.json"
+          tar -czf "$RUNNER_TEMP/hermesc-macos-arm64.tar.gz" -C "$bundle" .
+
+      - name: Upload the arm64 macOS compiler
+        if: matrix.platform == 'macosx'
+        uses: actions/upload-artifact@v4
+        with:
+          name: hermesc-macos-arm64
+          path: ${{ runner.temp }}/hermesc-macos-arm64.tar.gz
+          if-no-files-found: error
+          retention-days: 1
+
       - name: Build the runtime slice
         working-directory: hermes
         env:
@@ -84,7 +114,7 @@ jobs:
       - name: Upload the slice
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.platform }}
+          name: runtime-${{ matrix.platform }}
           path: ${{ runner.temp }}/${{ matrix.platform }}.tar.gz
           if-no-files-found: error
           retention-days: 1
@@ -123,7 +153,14 @@ jobs:
       - name: Download runtime slices
         uses: actions/download-artifact@v4
         with:
+          pattern: runtime-*
           path: slices
+
+      - name: Download the arm64 macOS compiler
+        uses: actions/download-artifact@v4
+        with:
+          name: hermesc-macos-arm64
+          path: compiler
 
       - name: Restore runtime slices
         run: |
@@ -161,12 +198,33 @@ jobs:
         working-directory: hermes
         run: ./utils/build-apple-framework.sh build_framework
 
+      - name: Validate and checksum the host compiler
+        run: |
+          archive="compiler/hermesc-macos-arm64.tar.gz"
+          directory="$RUNNER_TEMP/hermesc-validation"
+          mkdir -p "$directory"
+          tar -xzf "$archive" -C "$directory"
+          test -x "$directory/bin/hermesc"
+          [[ "$(file "$directory/bin/hermesc")" == *"arm64"* ]]
+          "$directory/bin/hermesc" -version
+          grep -q "\"revision\":\"$HERMES_REVISION\"" "$directory/SOURCE.json"
+
+          checksum=$(shasum -a 256 "$archive" | cut -d ' ' -f 1)
+          printf '%s  %s\n' "$checksum" "hermesc-macos-arm64.tar.gz" \
+            > "compiler/hermesc-macos-arm64.tar.gz.sha256"
+          echo "HERMESC=$directory/bin/hermesc" >> "$GITHUB_ENV"
+          echo "hermesc macOS arm64 SHA-256: \`$checksum\`" >> "$GITHUB_STEP_SUMMARY"
+
       - name: Validate the Swift package
         run: |
           mkdir -p Artifacts
           cp -R \
             hermes/destroot/Library/Frameworks/universal/hermesvm.xcframework \
             Artifacts/hermesvm.xcframework
+          "$HERMESC" \
+            -emit-binary \
+            -out Sources/RenkuNativeRuntimeProbe/Fixtures/runtime.hbc \
+            Sources/RenkuNativeRuntimeProbe/Fixtures/runtime.js
           RENKU_NATIVE_LOCAL_XCFRAMEWORK=Artifacts/hermesvm.xcframework \
             swift run RenkuNativeRuntimeProbe
 
@@ -233,6 +291,8 @@ jobs:
         run: |
           gh release create "$VERSION" \
             "$RUNNER_TEMP/hermesvm.xcframework.zip" \
+            compiler/hermesc-macos-arm64.tar.gz \
+            compiler/hermesc-macos-arm64.tar.gz.sha256 \
             LICENSE-HERMES \
             --title "$VERSION" \
             --generate-notes

@@ -33,3 +33,7 @@ GitHub Release. The release workflow builds each platform slice independently,
 assembles the XCFramework, validates the package, computes its checksum, and
 updates the manifest before tagging the release.
 
+The same release also contains `hermesc-macos-arm64.tar.gz` and its SHA-256
+sidecar. Renku's build tooling downloads this host compiler separately from
+Swift Package Manager. Building both artifacts from the same pinned Hermes
+revision makes each release one compiler/runtime compatibility unit.
