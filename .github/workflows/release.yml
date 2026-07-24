@@ -7,10 +7,6 @@ on:
         description: Semantic version tag, for example 0.1.0
         required: true
         type: string
-      reuse_runtime_version:
-        description: Existing release whose unchanged XCFramework should be reused, for example 0.1.0
-        required: false
-        type: string
 
 permissions:
   contents: write
@@ -76,7 +72,6 @@ jobs:
 
   build-slice:
     name: Build ${{ matrix.platform }}
-    if: inputs.reuse_runtime_version == ''
     runs-on: macos-26
     strategy:
       fail-fast: false
@@ -149,10 +144,6 @@ jobs:
     needs:
       - build-compiler
       - build-slice
-    if: >-
-      always() &&
-      needs.build-compiler.result == 'success' &&
-      (needs.build-slice.result == 'success' || needs.build-slice.result == 'skipped')
     runs-on: macos-26
 
     steps:
@@ -175,7 +166,6 @@ jobs:
           fi
 
       - name: Check out Hermes headers
-        if: inputs.reuse_runtime_version == ''
         uses: actions/checkout@v6
         with:
           repository: facebook/hermes
@@ -183,7 +173,6 @@ jobs:
           path: hermes
 
       - name: Download runtime slices
-        if: inputs.reuse_runtime_version == ''
         uses: actions/download-artifact@v4
         with:
           pattern: runtime-*
@@ -196,7 +185,6 @@ jobs:
           path: compiler
 
       - name: Restore runtime slices
-        if: inputs.reuse_runtime_version == ''
         run: |
           for archive in slices/*/*.tar.gz; do
             platform=$(basename "$archive" .tar.gz)
@@ -206,7 +194,6 @@ jobs:
           done
 
       - name: Add public headers and module metadata
-        if: inputs.reuse_runtime_version == ''
         run: |
           for framework in hermes/destroot/Library/Frameworks/*/hermesvm.framework; do
             if [[ -d "$framework/Versions" ]]; then
@@ -230,12 +217,10 @@ jobs:
           done
 
       - name: Assemble the XCFramework
-        if: inputs.reuse_runtime_version == ''
         working-directory: hermes
         run: ./utils/build-apple-framework.sh build_framework
 
       - name: Archive the newly built XCFramework
-        if: inputs.reuse_runtime_version == ''
         run: |
           mkdir -p Artifacts
           cp -R \
@@ -248,34 +233,6 @@ jobs:
             --keepParent \
             Artifacts/hermesvm.xcframework \
             "$RUNNER_TEMP/hermesvm.xcframework.zip"
-
-      - name: Reuse the published XCFramework
-        if: inputs.reuse_runtime_version != ''
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RUNTIME_VERSION: ${{ inputs.reuse_runtime_version }}
-        run: |
-          if [[ ! "$RUNTIME_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "Runtime reuse version must be a stable semantic version such as 0.1.0"
-            exit 1
-          fi
-          gh release download "$RUNTIME_VERSION" \
-            --repo "$GITHUB_REPOSITORY" \
-            --pattern hermesvm.xcframework.zip \
-            --dir "$RUNNER_TEMP"
-
-          checksum=$(swift package compute-checksum "$RUNNER_TEMP/hermesvm.xcframework.zip")
-          expected=$(sed -nE 's/.*checksum: "([0-9a-f]{64})".*/\1/p' Package.swift)
-          test -n "$expected"
-          test "$checksum" = "$expected"
-          grep -q "/releases/download/$RUNTIME_VERSION/" Package.swift
-
-          mkdir -p Artifacts
-          ditto \
-            -x \
-            -k \
-            "$RUNNER_TEMP/hermesvm.xcframework.zip" \
-            Artifacts
 
       - name: Validate and checksum the host compiler
         run: |
