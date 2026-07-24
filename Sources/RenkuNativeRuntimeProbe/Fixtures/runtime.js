@@ -1,2 +1,2 @@
 globalThis.renkuNativeRender = () => "ready";
-globalThis.renkuNativeInvoke = (action) => String(action);
+globalThis.renkuNativeInvoke = (action, payload) => `${action}:${payload}`;

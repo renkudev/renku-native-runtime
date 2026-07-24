@@ -50,8 +50,10 @@ public final class RenkuNativeRuntime {
     try Self.string(from: renku_native_runtime_render(handle))
   }
 
-  public func invoke(_ action: Int32) throws -> String {
-    try Self.string(from: renku_native_runtime_invoke(handle, action))
+  public func invoke(_ action: Int32, payload: String = "null") throws -> String {
+    try payload.withCString { payload in
+      try Self.string(from: renku_native_runtime_invoke(handle, action, payload))
+    }
   }
 
   private static func string(from pointer: UnsafePointer<CChar>?) throws -> String {
@@ -65,4 +67,3 @@ public final class RenkuNativeRuntime {
     RenkuNativeRuntimeError(message: String(cString: renku_native_runtime_last_error()))
   }
 }
-

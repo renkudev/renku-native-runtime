@@ -48,8 +48,10 @@ struct RuntimeState {
     return lastResult.c_str();
   }
 
-  const char *invoke(int32_t action) {
-    lastResult = invokeFunction.call(*engine, action).asString(*engine).utf8(*engine);
+  const char *invoke(int32_t action, const char *payload) {
+    auto value = facebook::jsi::String::createFromUtf8(*engine, payload);
+    lastResult =
+      invokeFunction.call(*engine, action, std::move(value)).asString(*engine).utf8(*engine);
     return lastResult.c_str();
   }
 };
@@ -129,17 +131,24 @@ const char *renku_native_runtime_render(renku_native_runtime *runtime) {
   });
 }
 
-const char *renku_native_runtime_invoke(renku_native_runtime *runtime, int32_t action) {
+const char *renku_native_runtime_invoke(
+  renku_native_runtime *runtime,
+  int32_t action,
+  const char *payload
+) {
   if (runtime == nullptr) {
     lastError = "Runtime is not initialized";
     return nullptr;
   }
+  if (payload == nullptr) {
+    lastError = "Action payload is not initialized";
+    return nullptr;
+  }
   return catchErrors<const char *>(nullptr, [&] {
-    return runtime->state->invoke(action);
+    return runtime->state->invoke(action, payload);
   });
 }
 
 const char *renku_native_runtime_last_error(void) {
   return lastError.c_str();
 }
-

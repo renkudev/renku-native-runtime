@@ -17,10 +17,13 @@ int renku_native_runtime_reload(
   size_t length
 );
 const char *renku_native_runtime_render(renku_native_runtime *runtime);
-const char *renku_native_runtime_invoke(renku_native_runtime *runtime, int32_t action);
+const char *renku_native_runtime_invoke(
+  renku_native_runtime *runtime,
+  int32_t action,
+  const char *payload
+);
 const char *renku_native_runtime_last_error(void);
 
 #ifdef __cplusplus
 }
 #endif
-
