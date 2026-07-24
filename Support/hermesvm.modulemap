@@ -1,0 +1,7 @@
+framework module hermesvm {
+  umbrella "Headers"
+  requires cplusplus
+  export *
+  module * { export * }
+}
+

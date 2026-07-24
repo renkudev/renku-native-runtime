@@ -1,0 +1,238 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Semantic version tag, for example 0.1.0
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: native-runtime-release
+  cancel-in-progress: false
+
+env:
+  BUILD_TYPE: Release
+  HERMES_REVISION: efcf68e285865fd9d952070b08e751bcad63f25e
+
+jobs:
+  build-slice:
+    name: Build ${{ matrix.platform }}
+    runs-on: macos-26
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        platform:
+          - macosx
+          - iphoneos
+          - iphonesimulator
+          - catalyst
+          - xros
+          - xrsimulator
+          - appletvos
+          - appletvsimulator
+
+    steps:
+      - name: Check out Hermes
+        uses: actions/checkout@v6
+        with:
+          repository: facebook/hermes
+          ref: ${{ env.HERMES_REVISION }}
+          path: hermes
+
+      - name: Report the build environment
+        run: |
+          xcodebuild -version
+          cmake --version
+          swift --version
+
+      - name: Build the host compiler
+        working-directory: hermes
+        run: ./utils/build-apple-framework.sh build_hermesc
+
+      - name: Build the runtime slice
+        working-directory: hermes
+        env:
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          case "$PLATFORM" in
+            macosx)
+              export MAC_DEPLOYMENT_TARGET=13.3
+              ;;
+            xros|xrsimulator)
+              export XROS_DEPLOYMENT_TARGET=1.0
+              ;;
+            *)
+              export IOS_DEPLOYMENT_TARGET=16.4
+              ;;
+          esac
+          ./utils/build-apple-framework.sh "$PLATFORM"
+
+      - name: Preserve framework symlinks
+        env:
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          tar -czf "$RUNNER_TEMP/$PLATFORM.tar.gz" \
+            -C "hermes/build_$PLATFORM/lib" \
+            hermesvm.framework
+
+      - name: Upload the slice
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.platform }}
+          path: ${{ runner.temp }}/${{ matrix.platform }}.tar.gz
+          if-no-files-found: error
+          retention-days: 1
+
+  release:
+    name: Assemble and publish
+    needs: build-slice
+    runs-on: macos-26
+
+    steps:
+      - name: Check out the package
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Validate the version
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Version must be a stable semantic version such as 0.1.0"
+            exit 1
+          fi
+          if git ls-remote --exit-code --tags origin "refs/tags/$VERSION"; then
+            echo "Tag $VERSION already exists"
+            exit 1
+          fi
+
+      - name: Check out Hermes headers
+        uses: actions/checkout@v6
+        with:
+          repository: facebook/hermes
+          ref: ${{ env.HERMES_REVISION }}
+          path: hermes
+
+      - name: Download runtime slices
+        uses: actions/download-artifact@v4
+        with:
+          path: slices
+
+      - name: Restore runtime slices
+        run: |
+          for archive in slices/*/*.tar.gz; do
+            platform=$(basename "$archive" .tar.gz)
+            destination="hermes/destroot/Library/Frameworks/$platform"
+            mkdir -p "$destination"
+            tar -xzf "$archive" -C "$destination"
+          done
+
+      - name: Add public headers and module metadata
+        run: |
+          for framework in hermes/destroot/Library/Frameworks/*/hermesvm.framework; do
+            if [[ -d "$framework/Versions" ]]; then
+              version_directory=$(find "$framework/Versions" -mindepth 1 -maxdepth 1 -type d | head -1)
+              headers="$version_directory/Headers"
+              modules="$version_directory/Modules"
+              mkdir -p "$headers/hermes/Public" "$headers/hermes/cdp" "$headers/jsi" "$modules"
+              [[ -e "$framework/Headers" ]] || ln -s Versions/Current/Headers "$framework/Headers"
+              [[ -e "$framework/Modules" ]] || ln -s Versions/Current/Modules "$framework/Modules"
+            else
+              headers="$framework/Headers"
+              modules="$framework/Modules"
+              mkdir -p "$headers/hermes/Public" "$headers/hermes/cdp" "$headers/jsi" "$modules"
+            fi
+
+            cp hermes/API/hermes/*.h "$headers/hermes/"
+            cp hermes/API/hermes/cdp/*.h "$headers/hermes/cdp/"
+            cp hermes/public/hermes/Public/*.h "$headers/hermes/Public/"
+            cp hermes/API/jsi/jsi/*.h "$headers/jsi/"
+            cp Support/hermesvm.modulemap "$modules/module.modulemap"
+          done
+
+      - name: Assemble the XCFramework
+        working-directory: hermes
+        run: ./utils/build-apple-framework.sh build_framework
+
+      - name: Validate the Swift package
+        run: |
+          mkdir -p Artifacts
+          cp -R \
+            hermes/destroot/Library/Frameworks/universal/hermesvm.xcframework \
+            Artifacts/hermesvm.xcframework
+          RENKU_NATIVE_LOCAL_XCFRAMEWORK=Artifacts/hermesvm.xcframework \
+            swift run RenkuNativeRuntimeProbe
+
+          for destination in \
+            "generic/platform=iOS" \
+            "generic/platform=iOS Simulator" \
+            "generic/platform=tvOS" \
+            "generic/platform=tvOS Simulator" \
+            "generic/platform=visionOS" \
+            "generic/platform=visionOS Simulator" \
+            "platform=macOS,variant=Mac Catalyst"; do
+            RENKU_NATIVE_LOCAL_XCFRAMEWORK=Artifacts/hermesvm.xcframework \
+              xcodebuild \
+                -quiet \
+                -scheme RenkuNativeRuntime \
+                -destination "$destination" \
+                -derivedDataPath DerivedData \
+                CODE_SIGNING_ALLOWED=NO \
+                build
+          done
+
+      - name: Archive and checksum the XCFramework
+        run: |
+          ditto \
+            -c \
+            -k \
+            --sequesterRsrc \
+            --keepParent \
+            Artifacts/hermesvm.xcframework \
+            "$RUNNER_TEMP/hermesvm.xcframework.zip"
+          checksum=$(swift package compute-checksum "$RUNNER_TEMP/hermesvm.xcframework.zip")
+          echo "CHECKSUM=$checksum" >> "$GITHUB_ENV"
+          echo "XCFramework checksum: \`$checksum\`" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Pin the release in Package.swift
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          sed -E -i '' \
+            "s#/releases/download/[^/]+/#/releases/download/$VERSION/#" \
+            Package.swift
+          sed -E -i '' \
+            "s/checksum: \"[0-9a-f]{64}\"/checksum: \"$CHECKSUM\"/" \
+            Package.swift
+          swift package dump-package > /dev/null
+          git diff --check
+
+      - name: Commit and tag the release
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add Package.swift
+          git commit -m "Release $VERSION"
+          git tag "$VERSION"
+          git push origin HEAD:main
+          git push origin "$VERSION"
+
+      - name: Publish the immutable binary
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          gh release create "$VERSION" \
+            "$RUNNER_TEMP/hermesvm.xcframework.zip" \
+            LICENSE-HERMES \
+            --title "$VERSION" \
+            --generate-notes
