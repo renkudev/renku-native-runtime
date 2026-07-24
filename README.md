@@ -20,7 +20,7 @@ Add this repository as a Swift package dependency and link the
 
 ```swift
 .package(
-  url: "https://github.com/renkudev/renku-native-runtime.git",
+  url: "https://github.com/renkudev/renku-native.git",
   from: "0.1.0"
 )
 ```
@@ -37,9 +37,4 @@ The same release also contains `hermesc-macos-arm64.tar.gz` and its SHA-256
 sidecar. Renku's build tooling downloads this host compiler separately from
 Swift Package Manager. Building both artifacts from the same pinned Hermes
 revision makes each release one compiler/runtime compatibility unit.
-
-For a compiler-only patch release, set `reuse_runtime_version` to the existing
-compatible release. The workflow republishes that release's verified,
-byte-identical XCFramework under the new tag, skips all runtime slice builds,
-and still validates bytecode produced by the new compiler against the reused
-runtime.
+Every release rebuilds and publishes both artifacts together.
