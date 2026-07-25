@@ -26,7 +26,7 @@ jobs:
 
     steps:
       - name: Check out Hermes
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: facebook/hermes
           ref: ${{ env.HERMES_REVISION }}
@@ -63,7 +63,7 @@ jobs:
           tar -czf "$RUNNER_TEMP/hermesc-macos-arm64.tar.gz" -C "$bundle" .
 
       - name: Upload the host compiler
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: hermesc-macos-arm64
           path: ${{ runner.temp }}/hermesc-macos-arm64.tar.gz
@@ -89,7 +89,7 @@ jobs:
 
     steps:
       - name: Check out Hermes
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: facebook/hermes
           ref: ${{ env.HERMES_REVISION }}
@@ -132,7 +132,7 @@ jobs:
             hermesvm.framework
 
       - name: Upload the slice
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: runtime-${{ matrix.platform }}
           path: ${{ runner.temp }}/${{ matrix.platform }}.tar.gz
@@ -148,7 +148,7 @@ jobs:
 
     steps:
       - name: Check out the package
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -166,20 +166,20 @@ jobs:
           fi
 
       - name: Check out Hermes headers
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: facebook/hermes
           ref: ${{ env.HERMES_REVISION }}
           path: hermes
 
       - name: Download runtime slices
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: runtime-*
           path: slices
 
       - name: Download the arm64 macOS compiler
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: hermesc-macos-arm64
           path: compiler
