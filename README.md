@@ -27,9 +27,10 @@ Add this repository as a Swift package dependency and link the
 
 Each semantic version tag points at a `Package.swift` whose binary target
 references an immutable `hermesvm.xcframework.zip` asset from the matching
-GitHub Release. The release workflow builds each platform slice independently,
-assembles the XCFramework, validates the package, computes its checksum, and
-updates the manifest before tagging the release.
+GitHub Release. The release workflow builds the native macOS, iOS device, and
+iOS Simulator slices independently, assembles the XCFramework, validates those
+three destinations, computes its checksum, and updates the manifest before
+tagging the release.
 
 The same release also contains `hermesc-macos-arm64.tar.gz` and its SHA-256
 sidecar. Renku's build tooling downloads this host compiler separately from

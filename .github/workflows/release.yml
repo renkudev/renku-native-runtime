@@ -22,7 +22,7 @@ env:
 jobs:
   build-compiler:
     name: Build macOS arm64 compiler
-    runs-on: macos-26
+    runs-on: xcode-27
 
     steps:
       - name: Check out Hermes
@@ -72,20 +72,14 @@ jobs:
 
   build-slice:
     name: Build ${{ matrix.platform }}
-    runs-on: macos-26
+    runs-on: xcode-27
     strategy:
       fail-fast: false
-      max-parallel: 4
       matrix:
         platform:
           - macosx
           - iphoneos
           - iphonesimulator
-          - catalyst
-          - xros
-          - xrsimulator
-          - appletvos
-          - appletvsimulator
 
     steps:
       - name: Check out Hermes
@@ -112,13 +106,10 @@ jobs:
         run: |
           case "$PLATFORM" in
             macosx)
-              export MAC_DEPLOYMENT_TARGET=13.3
+              export MAC_DEPLOYMENT_TARGET=27.0
               ;;
-            xros|xrsimulator)
-              export XROS_DEPLOYMENT_TARGET=1.0
-              ;;
-            *)
-              export IOS_DEPLOYMENT_TARGET=16.4
+            iphoneos|iphonesimulator)
+              export IOS_DEPLOYMENT_TARGET=27.0
               ;;
           esac
           ./utils/build-apple-framework.sh "$PLATFORM"
@@ -144,7 +135,7 @@ jobs:
     needs:
       - build-compiler
       - build-slice
-    runs-on: macos-26
+    runs-on: xcode-27
 
     steps:
       - name: Check out the package
@@ -218,7 +209,13 @@ jobs:
 
       - name: Assemble the XCFramework
         working-directory: hermes
-        run: ./utils/build-apple-framework.sh build_framework
+        run: |
+          mkdir -p destroot/Library/Frameworks/universal
+          xcodebuild -create-xcframework \
+            -framework destroot/Library/Frameworks/macosx/hermesvm.framework \
+            -framework destroot/Library/Frameworks/iphoneos/hermesvm.framework \
+            -framework destroot/Library/Frameworks/iphonesimulator/hermesvm.framework \
+            -output destroot/Library/Frameworks/universal/hermesvm.xcframework
 
       - name: Archive the newly built XCFramework
         run: |
@@ -258,16 +255,12 @@ jobs:
             -out Sources/RenkuNativeRuntimeProbe/Fixtures/runtime.hbc \
             Sources/RenkuNativeRuntimeProbe/Fixtures/runtime.js
           RENKU_NATIVE_LOCAL_XCFRAMEWORK=Artifacts/hermesvm.xcframework \
-            swift run RenkuNativeRuntimeProbe
+            swift build --product RenkuNativeRuntimeProbe
 
           for destination in \
+            "generic/platform=macOS" \
             "generic/platform=iOS" \
-            "generic/platform=iOS Simulator" \
-            "generic/platform=tvOS" \
-            "generic/platform=tvOS Simulator" \
-            "generic/platform=visionOS" \
-            "generic/platform=visionOS Simulator" \
-            "platform=macOS,variant=Mac Catalyst"; do
+            "generic/platform=iOS Simulator"; do
             RENKU_NATIVE_LOCAL_XCFRAMEWORK=Artifacts/hermesvm.xcframework \
               xcodebuild \
                 -quiet \
