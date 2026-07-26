@@ -3,15 +3,13 @@
 The managed Hermes runtime used by Renku native applications.
 
 The Swift package exposes `RenkuNativeRuntime`, backed by a pinned Hermes
-XCFramework containing these Apple platform variants:
+XCFramework, for these supported Renku destinations:
 
-- macOS
-- iOS and iOS Simulator
-- Mac Catalyst
-- tvOS and tvOS Simulator
-- visionOS and visionOS Simulator
+- macOS 27 or later
+- iOS and iPadOS 27 or later, including the iOS Simulator
 
-The pinned Hermes revision does not provide a watchOS build.
+Other slices that may be present in the binary XCFramework are not supported
+Renku destinations.
 
 ## Add the package
 

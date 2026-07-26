@@ -18,10 +18,8 @@ let hermesVM: Target = if let localArtifact {
 let package = Package(
   name: "RenkuNativeRuntime",
   platforms: [
-    .macOS("13.3"),
-    .iOS("16.4"),
-    .tvOS("16.4"),
-    .visionOS(.v1),
+    .macOS("27.0"),
+    .iOS("27.0"),
   ],
   products: [
     .library(name: "RenkuNativeRuntime", targets: ["RenkuNativeRuntime"]),
