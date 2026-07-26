@@ -50,9 +50,9 @@ struct RuntimeState {
 
   const char *invoke(int32_t action, const char *payload) {
     auto value = facebook::jsi::String::createFromUtf8(*engine, payload);
-    lastResult =
-      invokeFunction.call(*engine, action, std::move(value)).asString(*engine).utf8(*engine);
-    return lastResult.c_str();
+    invokeFunction.call(*engine, action, std::move(value));
+    while (!engine->drainMicrotasks()) {}
+    return render();
   }
 };
 

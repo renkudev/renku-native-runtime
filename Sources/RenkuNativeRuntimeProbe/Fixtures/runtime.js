@@ -1,2 +1,7 @@
-globalThis.renkuNativeRender = () => "ready";
-globalThis.renkuNativeInvoke = (action, payload) => `${action}:${payload}`;
+let output = "ready";
+globalThis.renkuNativeRender = () => output;
+globalThis.renkuNativeInvoke = (action, payload) => {
+  Promise.resolve().then(() => {
+    output = `${action}:${payload}`;
+  });
+};

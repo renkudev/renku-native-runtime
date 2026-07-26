@@ -34,3 +34,7 @@ sidecar. Renku's build tooling downloads this host compiler separately from
 Swift Package Manager. Building both artifacts from the same pinned Hermes
 revision makes each release one compiler/runtime compatibility unit.
 Every release rebuilds and publishes both artifacts together.
+
+Runtime invocations drain Hermes Promise microtasks before producing the next render. This lets
+native host operations resume asynchronous TypeScript application workflows while preserving the
+synchronous render-and-invoke host interface.
