@@ -17,6 +17,8 @@ concurrency:
 
 env:
   BUILD_TYPE: Release
+  HERMES_APPLE_ARCHITECTURES: "arm64"
+  HERMES_BUILD_LEAN_LIBHERMES: "true"
   HERMES_REVISION: efcf68e285865fd9d952070b08e751bcad63f25e
 
 jobs:
@@ -32,6 +34,11 @@ jobs:
           - iphonesimulator
 
     steps:
+      - name: Check out the package
+        uses: actions/checkout@v7
+        with:
+          path: package
+
       - name: Check out Hermes
         uses: actions/checkout@v7
         with:
@@ -39,12 +46,17 @@ jobs:
           ref: ${{ env.HERMES_REVISION }}
           path: hermes
 
+      - name: Configure the runtime-only arm64 build
+        run: git -C hermes apply "$GITHUB_WORKSPACE/package/Support/hermes-runtime.patch"
+
       - name: Report the build environment
         run: |
           xcodebuild -version
           cmake --version
           swift --version
           test "$(uname -m)" = "arm64"
+          test "$HERMES_APPLE_ARCHITECTURES" = "arm64"
+          test "$HERMES_BUILD_LEAN_LIBHERMES" = "true"
 
       - name: Build the host compiler
         working-directory: hermes
@@ -93,6 +105,12 @@ jobs:
               ;;
           esac
           ./utils/build-apple-framework.sh "$PLATFORM"
+          grep -Eq \
+            '^HERMES_BUILD_LEAN_LIBHERMES:[^=]+=true$' \
+            "build_$PLATFORM/CMakeCache.txt"
+          grep -q \
+            '^CMAKE_OSX_ARCHITECTURES:STRING=arm64$' \
+            "build_$PLATFORM/CMakeCache.txt"
 
       - name: Preserve framework symlinks
         env:
@@ -194,6 +212,12 @@ jobs:
             -framework destroot/Library/Frameworks/iphoneos/hermesvm.framework \
             -framework destroot/Library/Frameworks/iphonesimulator/hermesvm.framework \
             -output destroot/Library/Frameworks/universal/hermesvm.xcframework
+
+          xcframework=destroot/Library/Frameworks/universal/hermesvm.xcframework
+          test "$(find "$xcframework" -type f -name hermesvm | wc -l | tr -d ' ')" = "3"
+          while IFS= read -r binary; do
+            test "$(lipo -archs "$binary")" = "arm64"
+          done < <(find "$xcframework" -type f -name hermesvm)
 
       - name: Archive the newly built XCFramework
         run: |

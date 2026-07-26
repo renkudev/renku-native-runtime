@@ -8,6 +8,9 @@ XCFramework, for these supported Renku destinations:
 - macOS 27 or later
 - iOS and iPadOS 27 or later, including the iOS Simulator
 
+The binary runtime supports arm64 devices and arm64 Apple Silicon development
+hosts. Intel Macs and x86_64 simulators are not supported.
+
 ## Add the package
 
 Add this repository as a Swift package dependency and link the

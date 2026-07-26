@@ -1,0 +1,18 @@
+diff --git a/utils/build-apple-framework.sh b/utils/build-apple-framework.sh
+--- a/utils/build-apple-framework.sh
++++ b/utils/build-apple-framework.sh
+@@ -162,5 +162,6 @@ function configure_apple_framework {
+       -DHERMES_ENABLE_BITCODE:BOOLEAN=false \
+       -DHERMES_BUILD_APPLE_FRAMEWORK:BOOLEAN=true \
++      -DHERMES_BUILD_LEAN_LIBHERMES:BOOLEAN="${HERMES_BUILD_LEAN_LIBHERMES:-false}" \
+       -DHERMES_BUILD_SHARED_JSI:BOOLEAN=false \
+       -DCMAKE_CXX_FLAGS:STRING="-gdwarf $shared_clang_flags" \
+       -DCMAKE_C_FLAGS:STRING="-gdwarf $shared_clang_flags" \
+@@ -282,6 +283,6 @@ function build_framework {
+   if [ ! -d destroot/Library/Frameworks/universal/hermesvm.xcframework ]; then
+     deployment_target=$(get_deployment_target "$1")
+-    architecture=$(get_architecture "$1")
++    architecture=${HERMES_APPLE_ARCHITECTURES:-$(get_architecture "$1")}
+     build_apple_framework "$1" "$architecture" "$deployment_target"
+   else
+     echo "Skipping; Clean \"destroot\" to rebuild".
