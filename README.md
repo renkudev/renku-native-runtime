@@ -8,9 +8,6 @@ XCFramework, for these supported Renku destinations:
 - macOS 27 or later
 - iOS and iPadOS 27 or later, including the iOS Simulator
 
-Other slices that may be present in the binary XCFramework are not supported
-Renku destinations.
-
 ## Add the package
 
 Add this repository as a Swift package dependency and link the
