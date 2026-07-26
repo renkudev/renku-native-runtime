@@ -10,8 +10,8 @@ let hermesVM: Target = if let localArtifact {
 } else {
   .binaryTarget(
     name: "HermesVM",
-    url: "https://github.com/renkudev/renku-native/releases/download/0.1.4/hermesvm.xcframework.zip",
-    checksum: "6401df1dc1afb9c597ba92e46e9ea49188a5e8959ff73b6b75e1bf40cf744b14"
+    url: "https://github.com/renkudev/renku-native/releases/download/0.1.5/hermesvm.xcframework.zip",
+    checksum: "8b21d3646b1d4e2c9f769801338245b02a04a91396127e5e6c0f5e6c3f0eb7c5"
   )
 }
 
